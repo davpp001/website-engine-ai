@@ -328,7 +328,7 @@ def backup(auto: bool = typer.Option(False, '--auto'), manual: bool = typer.Opti
     setup_logging()
     import datetime
     now = datetime.datetime.now().strftime('%Y-%m-%d')
-    creds = load_config(os.path.expanduser('~/.config/ionos_wp_manager/credentials'))
+    creds = load_credentials()
     cfg = load_config(config)
     s3_bucket = cfg.get('s3_bucket', os.getenv('S3_BUCKET'))
     lockfile = f"/tmp/ionos_wp_manager_backup.lock"

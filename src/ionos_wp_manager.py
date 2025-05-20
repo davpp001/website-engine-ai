@@ -168,11 +168,15 @@ server {{
         db_user = f"wp_{prefix}_user"
         db_pass = os.urandom(12).hex()
         os.system(f"sudo mysql -e \"CREATE DATABASE IF NOT EXISTS {db_name}; CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{db_pass}'; GRANT ALL ON {db_name}.* TO '{db_user}'@'localhost'; FLUSH PRIVILEGES;\"")
-        # WP-CLI
-        os.system(f"wp core download --path={webroot}")
-        os.system(f"wp config create --dbname={db_name} --dbuser={db_user} --dbpass={db_pass} --path={webroot} --skip-check")
+        # WP-CLI (immer mit --allow-root, falls root)
+        wp_root = "--allow-root" if os.geteuid() == 0 else ""
+        os.system(f"wp core download {wp_root} --path={webroot}")
+        os.system(f"wp config create {wp_root} --dbname={db_name} --dbuser={db_user} --dbpass={db_pass} --path={webroot} --skip-check")
         admin_pass = os.urandom(12).hex()
-        os.system(f"wp core install --url=https://{full_domain} --title='{prefix}' --admin_user=admin_{prefix} --admin_password={admin_pass} --admin_email=admin@{base_domain} --path={webroot}")
+        os.system(f"wp core install {wp_root} --url=https://{full_domain} --title='{prefix}' --admin_user=admin_{prefix} --admin_password={admin_pass} --admin_email=admin@{base_domain} --path={webroot}")
+        # Nach WP-Install: Rechte setzen
+        os.system(f"chown -R www-data:www-data {webroot}")
+        os.system(f"chmod -R 755 {webroot}")
         log_json({"url": f"https://{full_domain}", "admin_user": f"admin_{prefix}", "admin_password": admin_pass}, level='INFO')
         typer.echo(f"Site {full_domain} erfolgreich angelegt.")
         # Nginx-Konfiguration

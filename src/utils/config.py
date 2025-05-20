@@ -34,8 +34,9 @@ def save_credentials(creds: dict, encrypt=True):
 
 def validate_prefix(prefix: str):
     import re
-    if not re.match(r'^[a-zA-Z0-9]+$', prefix):
-        raise ValueError('Prefix must be alphanumeric')
+    # Erlaube Bindestriche, aber nicht am Anfang/Ende und nicht mehrfach hintereinander
+    if not re.match(r'^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$', prefix):
+        raise ValueError('Prefix darf Buchstaben, Zahlen und Bindestriche enthalten, aber nicht mit Bindestrich beginnen/enden oder doppelte Bindestriche enthalten.')
     return prefix
 
 def load_credentials():

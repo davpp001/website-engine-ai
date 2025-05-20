@@ -1,14 +1,60 @@
-import subprocess
-import time
 import requests
+import os
+import time
 import boto3
 
 def cloudflare_create_dns(domain, ip, token):
-    # cloudflare-cli or direct API call
-    pass
+    # Cloudflare API: Create A record
+    zone_id = get_cloudflare_zone_id(domain, token)
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "type": "A",
+        "name": domain,
+        "content": ip,
+        "ttl": 120,
+        "proxied": False
+    }
+    resp = requests.post(url, headers=headers, json=data)
+    if not resp.ok:
+        raise Exception(f"Cloudflare DNS create failed: {resp.text}")
+    return resp.json()
 
 def cloudflare_delete_dns(domain, token):
-    pass
+    # Cloudflare API: Delete A record
+    zone_id = get_cloudflare_zone_id(domain, token)
+    record_id = get_cloudflare_record_id(domain, token, zone_id)
+    if not record_id:
+        return
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{record_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.delete(url, headers=headers)
+    if not resp.ok:
+        raise Exception(f"Cloudflare DNS delete failed: {resp.text}")
+    return resp.json()
+
+def get_cloudflare_zone_id(domain, token):
+    # Get the base domain (zone)
+    base = ".".join(domain.split(".")[-2:])
+    url = "https://api.cloudflare.com/client/v4/zones"
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"name": base}
+    resp = requests.get(url, headers=headers, params=params)
+    if not resp.ok or not resp.json().get("result"):
+        raise Exception(f"Cloudflare zone lookup failed: {resp.text}")
+    return resp.json()["result"][0]["id"]
+
+def get_cloudflare_record_id(domain, token, zone_id):
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"name": domain}
+    resp = requests.get(url, headers=headers, params=params)
+    if not resp.ok or not resp.json().get("result"):
+        return None
+    return resp.json()["result"][0]["id"]
 
 def certbot_issue_ssl(domain, cf_token):
     # certbot certonly --dns-cloudflare ...

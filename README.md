@@ -23,3 +23,7 @@ python3 src/ionos_wp_manager.py --help
 
 ## Doku & Runbook
 Siehe [docs/runbook.md](docs/runbook.md)
+
+## Änderungen
+- Cloudflare-CLI wird **nicht** mehr benötigt. DNS-Änderungen erfolgen direkt per Cloudflare-API (integriert im Python-Code).
+- Für DNS- und SSL-Funktionen ist ein gültiges Cloudflare-API-Token erforderlich (siehe `init`).

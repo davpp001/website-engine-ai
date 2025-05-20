@@ -31,7 +31,7 @@ snap install ionosctl
 
 # 8. Node.js & npm (für cloudflare-cli)
 apt install -y npm
-npm install -g @cloudflare/cli
+# cloudflare-cli wird nicht mehr installiert, stattdessen API-Integration in Python
 
 # 9. Teste alle Tools
 php -v
@@ -39,7 +39,6 @@ nginx -v
 mariadb --version
 fail2ban-client --version
 wp --info
-cloudflare --version
 ionosctl --version
 
 # 10. Fertig

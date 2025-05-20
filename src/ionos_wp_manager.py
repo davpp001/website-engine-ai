@@ -62,7 +62,7 @@ def server_setup(dry_run: bool = typer.Option(False, '--dry-run'), config: str =
         'sudo pip3 install awscli',
         'sudo apt install -y certbot',
         'sudo apt install -y wp-cli',
-        'sudo apt install -y cloudflare-cli',
+        # cloudflare-cli entfernt, stattdessen Cloudflare-API in Python
         'sudo apt install -y ionosctl || sudo pip3 install ionosctl',
     ]
     cronjobs = [

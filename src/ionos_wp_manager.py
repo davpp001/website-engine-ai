@@ -16,13 +16,13 @@ app = typer.Typer()
 
 @app.command()
 def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config')):
-    """Interaktive Ersteinrichtung der Config/Credentials"""
+    """Interaktive Ersteinrichtung der Config/Credentials (Multi-Cloud-ready)"""
     setup_logging()
     typer.echo("Willkommen zum IONOS WP Manager Init-Wizard!")
     cf_token = typer.prompt("Cloudflare API Token", hide_input=True)
     ionos_token = typer.prompt("IONOS API Token", hide_input=True)
-    aws_key = typer.prompt("AWS Access Key ID", hide_input=True)
-    aws_secret = typer.prompt("AWS Secret Access Key", hide_input=True)
+    aws_key = typer.prompt("S3 Access Key ID (AWS/IONOS/MinIO)", hide_input=True)
+    aws_secret = typer.prompt("S3 Secret Access Key (AWS/IONOS/MinIO)", hide_input=True)
     s3_endpoint = typer.prompt("S3 Endpoint (z.B. https://s3.eu-central-1.ionoscloud.com)", default="https://s3.amazonaws.com")
     s3_bucket = typer.prompt("S3 Bucket Name")
     ionos_server_id = typer.prompt("IONOS Server ID (für Snapshots)")

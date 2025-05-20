@@ -113,6 +113,8 @@ def create_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
         db_name = f"wp_{prefix}"
         db_user = f"wp_{prefix}_user"
         db_pass = os.urandom(12).hex()
+        print(f"DEBUG: db_name={db_name}, db_user={db_user}, db_pass={db_pass}")
+        print(f"DEBUG: SQL: sudo mysql -e \"CREATE DATABASE IF NOT EXISTS `{db_name}`; CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{db_pass}'; GRANT ALL ON `{db_name}`.* TO '{db_user}'@'localhost'; FLUSH PRIVILEGES;\"")
         # DNS
         if dry_run:
             log_json({"dry-run": True, "action": "create-site", "domain": full_domain}, level='INFO')

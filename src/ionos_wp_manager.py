@@ -167,7 +167,8 @@ server {{
         db_name = f"wp_{prefix}"
         db_user = f"wp_{prefix}_user"
         db_pass = os.urandom(12).hex()
-        os.system(f"sudo mysql -e \"CREATE DATABASE IF NOT EXISTS {db_name}; CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{db_pass}'; GRANT ALL ON {db_name}.* TO '{db_user}'@'localhost'; FLUSH PRIVILEGES;\"")
+        # Backticks für DB- und Usernamen mit Bindestrich
+        os.system(f"sudo mysql -e \"CREATE DATABASE IF NOT EXISTS `{db_name}`; CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{db_pass}'; GRANT ALL ON `{db_name}`.* TO '{db_user}'@'localhost'; FLUSH PRIVILEGES;\"")
         # WP-CLI (immer mit --allow-root, falls root)
         wp_root = "--allow-root" if os.geteuid() == 0 else ""
         os.system(f"wp core download {wp_root} --path={webroot}")
@@ -210,7 +211,9 @@ server {{
         do_create()
     except Exception as e:
         # Rollback: DB, FS, DNS
-        os.system(f"sudo mysql -e \"DROP DATABASE IF EXISTS wp_{prefix}; DROP USER IF EXISTS 'wp_{prefix}_user'@'localhost';\"")
+        db_name = f"wp_{prefix}"
+        db_user = f"wp_{prefix}_user"
+        os.system(f"sudo mysql -e \"DROP DATABASE IF EXISTS `{db_name}`; DROP USER IF EXISTS '{db_user}'@'localhost';\"")
         os.system(f"rm -rf /var/www/{prefix}")
         cloudflare_delete_dns(full_domain, creds['CF_API_TOKEN'])
         log_json({"status": "rollback", "error": str(e)}, level='ERROR')
@@ -237,8 +240,9 @@ def delete_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
             log_json({"dry-run": True, "action": "delete-site", "domain": full_domain}, level='INFO')
             typer.echo(f"[DRY-RUN] Site {full_domain} würde gelöscht.")
             return
-        # Datenbank und User explizit löschen
-        os.system(f"sudo mysql -e \"DROP DATABASE IF EXISTS wp_{prefix}; DROP USER IF EXISTS 'wp_{prefix}_user'@'localhost'; FLUSH PRIVILEGES;\"")
+        db_name = f"wp_{prefix}"
+        db_user = f"wp_{prefix}_user"
+        os.system(f"sudo mysql -e \"DROP DATABASE IF EXISTS `{db_name}`; DROP USER IF EXISTS '{db_user}'@'localhost'; FLUSH PRIVILEGES;\"")
         # Webroot löschen
         os.system(f"rm -rf /var/www/{prefix}")
         # Nginx-Konfig löschen

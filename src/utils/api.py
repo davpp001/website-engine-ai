@@ -107,7 +107,7 @@ def s3_upload_backup(file_path, bucket, aws_key, aws_secret, s3_endpoint=None):
             region = 'eu-central-1'
     try:
         logging.info(f"[DEBUG] S3-Upload: file={file_path}, bucket={bucket}, endpoint={s3_endpoint}, region={region}, key={aws_key[:4]}***, secret=***")
-        config = Config(signature_version='s3v4', s3={'addressing_style': 'path'}, payload_signing_enabled=True)
+        config = Config(signature_version='s3v4', s3={'addressing_style': 'path'})
         if s3_endpoint:
             s3 = boto3.client(
                 's3',

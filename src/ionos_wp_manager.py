@@ -33,9 +33,10 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
     ionos_volume_id = typer.prompt("IONOS Volume ID (optional, für Volumen-Snapshots)", default="")
     ssh_key_path = typer.prompt("Pfad zum SSH Private Key", default=os.path.expanduser("~/.ssh/id_rsa"))
     base_domain = typer.prompt("Base Domain (z.B. example.com)")
+    ssl_email = typer.prompt("E-Mail-Adresse für SSL/Certbot (z.B. admin@example.com)", default=f"admin@{base_domain}")
     # Validierung
-    if not all([cf_token, ionos_token, aws_key, aws_secret, s3_bucket, s3_endpoint, ionos_server_id, restic_password, base_domain]):
-        typer.echo("API-Tokens, S3-, Restic- und IONOS-Parameter dürfen nicht leer sein.")
+    if not all([cf_token, ionos_token, aws_key, aws_secret, s3_bucket, s3_endpoint, ionos_server_id, restic_password, base_domain, ssl_email]):
+        typer.echo("API-Tokens, S3-, Restic-, IONOS-Parameter und E-Mail dürfen nicht leer sein.")
         raise typer.Exit(code=2)
     if not os.path.exists(ssh_key_path):
         typer.echo(f"SSH-Key nicht gefunden: {ssh_key_path}")
@@ -54,7 +55,8 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
         's3_endpoint': s3_endpoint,
         'ionos_server_id': ionos_server_id,
         'ionos_volume_id': ionos_volume_id,
-        'base_domain': base_domain
+        'base_domain': base_domain,
+        'ssl_email': ssl_email
     }
     config_file = config or os.path.expanduser('~/.config/ionos_wp_manager/config.yml')
     import yaml
@@ -142,23 +144,52 @@ def server_setup(dry_run: bool = typer.Option(False, '--dry-run'), config: str =
                 typer.echo(f"[OK] Restic-Repo '{repo}' ist bereits initialisiert.")
     except Exception as e:
         typer.echo(f"[WARN] Restic-Repo-Init übersprungen: {e}")
-    cronjobs = [
-        '0 2 * * * /usr/local/bin/ionos_wp_manager backup --auto',
-        '0 3 * * 0 /usr/local/bin/ionos_wp_manager snapshot'
+    # Home-Verzeichnis-Check
+    home_dir = os.path.expanduser('~')
+    if not os.path.isdir(home_dir) or not os.access(home_dir, os.W_OK):
+        typer.echo(f"[ERROR] Home-Verzeichnis {home_dir} existiert nicht oder ist nicht beschreibbar. Bitte prüfen!")
+        raise typer.Exit(code=2)
+    # Nach der Installation: Tool-Checks
+    required_tools = [
+        ('restic', '--version'),
+        ('wp', '--info'),
+        ('ionosctl', '--version'),
+        ('certbot', '--version'),
+        ('mariadb', '--version'),
+        ('nginx', '-v'),
+        ('fail2ban-client', '--version')
     ]
-    if dry_run:
-        log_json({"dry-run": True, "commands": cmds, "cronjobs": cronjobs}, level='INFO')
-        typer.echo("[DRY-RUN] Server-Setup-Befehle würden ausgeführt.")
-        raise typer.Exit(code=0)
-    for cmd in cmds:
-        typer.echo(f"Führe aus: {cmd}")
-        ret = os.system(cmd)
-        summary[cmd] = ret
+    missing_tools = []
+    restic_version = None
+    for tool, arg in required_tools:
+        ret = os.system(f"which {tool} > /dev/null 2>&1")
+        if ret != 0:
+            missing_tools.append(tool)
+        if tool == 'restic' and ret == 0:
+            import subprocess
+            result = subprocess.run([tool, '--version'], capture_output=True, text=True)
+            if result.returncode == 0:
+                import re
+                m = re.search(r'restic ([0-9]+\.[0-9]+\.[0-9]+)', result.stdout)
+                if m:
+                    restic_version = m.group(1)
+    if missing_tools:
+        typer.echo(f"[WARN] Folgende Tools fehlen oder sind nicht im PATH: {', '.join(missing_tools)}")
+    else:
+        typer.echo("[OK] Alle benötigten Tools sind installiert und im PATH.")
+    # Restic-Versionscheck
+    def version_tuple(v):
+        return tuple(map(int, (v.split("."))))
+    if restic_version and version_tuple(restic_version) < (0, 15, 0):
+        typer.echo(f"[WARN] Restic-Version {restic_version} ist veraltet (<0.15.0). Für S3/IONOS wird >=0.15.0 empfohlen. Update mit: sudo apt install -y restic")
+    elif restic_version:
+        typer.echo(f"[OK] Restic-Version {restic_version} ist ausreichend.")
     # Cronjobs anlegen (crontab -l; echo ... | crontab -)
     for job in cronjobs:
         os.system(f'(crontab -l 2>/dev/null; echo "{job}") | sort -u | crontab -')
     log_json({"status": "ok", "summary": summary, "cronjobs": cronjobs}, level='INFO')
     typer.echo("Server-Setup abgeschlossen.")
+    typer.echo("\n[HINWEIS] Teste die Installation mit:\n  ionos_wp_manager create-site test123\n  ionos_wp_manager backup --dry-run\n  ionos_wp_manager delete-site test123 --dry-run\n")
 
 @app.command()
 def create_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config')):

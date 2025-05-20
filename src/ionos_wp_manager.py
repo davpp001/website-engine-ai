@@ -16,7 +16,7 @@ app = typer.Typer()
 
 @app.command()
 def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config'), show_credentials: bool = typer.Option(False, '--show-credentials', help='Credentials sichtbar eingeben')):
-    """Interaktive Ersteinrichtung der Config/Credentials (Multi-Cloud-ready)"""
+    """Interaktive Ersteinrichtung der Config/Credentials (Multi-Cloud-ready, Restic-ready)"""
     setup_logging()
     typer.echo("Willkommen zum IONOS WP Manager Init-Wizard!")
     prompt_kwargs = {'hide_input': not show_credentials}
@@ -24,14 +24,16 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
     ionos_token = typer.prompt("IONOS API Token", **prompt_kwargs)
     aws_key = typer.prompt("S3 Access Key ID (AWS/IONOS/MinIO)", **prompt_kwargs)
     aws_secret = typer.prompt("S3 Secret Access Key (AWS/IONOS/MinIO)", **prompt_kwargs)
-    s3_endpoint = typer.prompt("S3 Endpoint (z.B. https://s3.eu-central-1.ionoscloud.com)", default="https://s3.amazonaws.com")
+    s3_endpoint = typer.prompt("S3 Endpoint (z.B. https://s3.eu-central-3.ionoscloud.com)", default="https://s3.amazonaws.com")
     s3_bucket = typer.prompt("S3 Bucket Name")
+    restic_password = typer.prompt("Restic-Repo-Passwort (wird für alle Backups benötigt)", **prompt_kwargs)
     ionos_server_id = typer.prompt("IONOS Server ID (für Snapshots)")
     ionos_volume_id = typer.prompt("IONOS Volume ID (optional, für Volumen-Snapshots)", default="")
     ssh_key_path = typer.prompt("Pfad zum SSH Private Key", default=os.path.expanduser("~/.ssh/id_rsa"))
+    base_domain = typer.prompt("Base Domain (z.B. example.com)")
     # Validierung
-    if not cf_token or not ionos_token or not aws_key or not aws_secret or not s3_bucket or not s3_endpoint or not ionos_server_id:
-        typer.echo("API-Tokens, S3- und IONOS-Parameter dürfen nicht leer sein.")
+    if not all([cf_token, ionos_token, aws_key, aws_secret, s3_bucket, s3_endpoint, ionos_server_id, restic_password, base_domain]):
+        typer.echo("API-Tokens, S3-, Restic- und IONOS-Parameter dürfen nicht leer sein.")
         raise typer.Exit(code=2)
     if not os.path.exists(ssh_key_path):
         typer.echo(f"SSH-Key nicht gefunden: {ssh_key_path}")
@@ -42,6 +44,7 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
         'AWS_ACCESS_KEY_ID': aws_key,
         'AWS_SECRET_ACCESS_KEY': aws_secret,
         'S3_ENDPOINT': s3_endpoint,
+        'RESTIC_PASSWORD': restic_password,
         'SSH_KEY_PATH': ssh_key_path
     }
     config_data = {
@@ -49,13 +52,9 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
         's3_endpoint': s3_endpoint,
         'ionos_server_id': ionos_server_id,
         'ionos_volume_id': ionos_volume_id,
+        'base_domain': base_domain
     }
-    # base_domain ggf. abfragen, falls nicht vorhanden
     config_file = config or os.path.expanduser('~/.config/ionos_wp_manager/config.yml')
-    if not os.path.exists(config_file):
-        base_domain = typer.prompt("Base Domain (z.B. example.com)")
-        config_data['base_domain'] = base_domain
-    # Save config
     import yaml
     os.makedirs(os.path.dirname(config_file), exist_ok=True)
     with open(config_file, 'w') as f:
@@ -70,27 +69,77 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
 
 @app.command()
 def server_setup(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config')):
-    """Server-Grundinstallation und Härtung"""
+    """Server-Grundinstallation und Härtung (inkl. Python-Abhängigkeiten, Restic, Tools, S3-Bucket-Check)"""
     setup_logging()
     summary = {}
     cmds = [
         'sudo apt update && sudo apt upgrade -y',
-        'sudo ufw allow OpenSSH',
-        'sudo ufw allow http',
-        'sudo ufw allow https',
-        'sudo ufw --force enable',
-        'sudo apt install -y fail2ban nginx php8.2-fpm mariadb-server',
+        # Systempakete und Tools
+        'sudo apt install -y fail2ban nginx php8.2-fpm mariadb-server python3-pip python3-venv restic certbot wp-cli ionosctl tar curl git unzip',
         'sudo systemctl enable --now fail2ban',
         'sudo systemctl enable --now nginx',
         'sudo systemctl enable --now php8.2-fpm',
         'sudo systemctl enable --now mariadb',
-        'sudo apt install -y python3-pip',
-        'sudo pip3 install awscli',
-        'sudo apt install -y certbot',
-        'sudo apt install -y wp-cli',
-        # cloudflare-cli entfernt, stattdessen Cloudflare-API in Python
-        'sudo apt install -y ionosctl || sudo pip3 install ionosctl',
+        # Python requirements (im Projektverzeichnis!)
+        'pip3 install --upgrade pip',
+        'pip3 install --upgrade -r requirements.txt',
+        # Optional: Symlink CLI
+        'sudo ln -sf $(pwd)/src/ionos_wp_manager.py /usr/local/bin/ionos_wp_manager',
     ]
+    # S3-Bucket-Check und Anlage (wenn möglich)
+    try:
+        import yaml
+        cfg = load_config(config)
+        creds = load_credentials()
+        s3_endpoint = cfg.get('s3_endpoint', creds.get('S3_ENDPOINT'))
+        s3_bucket = cfg.get('s3_bucket')
+        aws_key = creds.get('AWS_ACCESS_KEY_ID')
+        aws_secret = creds.get('AWS_SECRET_ACCESS_KEY')
+        if s3_endpoint and s3_bucket and aws_key and aws_secret:
+            import boto3
+            from botocore.client import Config
+            s3 = boto3.client(
+                's3',
+                aws_access_key_id=aws_key,
+                aws_secret_access_key=aws_secret,
+                endpoint_url=s3_endpoint,
+                config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
+            )
+            buckets = [b['Name'] for b in s3.list_buckets().get('Buckets', [])]
+            if s3_bucket not in buckets:
+                s3.create_bucket(Bucket=s3_bucket)
+                typer.echo(f"[OK] S3-Bucket '{s3_bucket}' wurde angelegt.")
+            else:
+                typer.echo(f"[OK] S3-Bucket '{s3_bucket}' existiert bereits.")
+    except Exception as e:
+        typer.echo(f"[WARN] S3-Bucket-Check/Anlage übersprungen: {e}")
+    # Restic-Repo-Init (optional, falls Passwort vorhanden)
+    try:
+        creds = load_credentials()
+        cfg = load_config(config)
+        restic_password = creds.get('RESTIC_PASSWORD')
+        s3_endpoint = cfg.get('s3_endpoint', creds.get('S3_ENDPOINT'))
+        s3_bucket = cfg.get('s3_bucket')
+        if restic_password and s3_endpoint and s3_bucket:
+            import subprocess
+            import shlex
+            repo = f"s3:{s3_endpoint.replace('https://','').replace('http://','')}/{s3_bucket}"
+            env = os.environ.copy()
+            env['RESTIC_PASSWORD'] = restic_password
+            env['AWS_ACCESS_KEY_ID'] = creds.get('AWS_ACCESS_KEY_ID')
+            env['AWS_SECRET_ACCESS_KEY'] = creds.get('AWS_SECRET_ACCESS_KEY')
+            # Prüfe, ob Repo schon initialisiert ist
+            check = subprocess.run(["restic", "snapshots", "-r", repo], env=env, capture_output=True, text=True)
+            if 'Is there a repository at the following location?' in check.stderr or 'config file does not exist' in check.stderr:
+                init = subprocess.run(["restic", "init", "-r", repo], env=env, capture_output=True, text=True)
+                if init.returncode == 0:
+                    typer.echo(f"[OK] Restic-Repo '{repo}' wurde initialisiert.")
+                else:
+                    typer.echo(f"[WARN] Restic-Repo-Init fehlgeschlagen: {init.stderr}")
+            else:
+                typer.echo(f"[OK] Restic-Repo '{repo}' ist bereits initialisiert.")
+    except Exception as e:
+        typer.echo(f"[WARN] Restic-Repo-Init übersprungen: {e}")
     cronjobs = [
         '0 2 * * * /usr/local/bin/ionos_wp_manager backup --auto',
         '0 3 * * 0 /usr/local/bin/ionos_wp_manager snapshot'

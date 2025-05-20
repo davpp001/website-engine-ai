@@ -126,7 +126,8 @@ def s3_upload_backup(file_path, bucket, aws_key, aws_secret, s3_endpoint=None):
                 config=config
             )
         with open(file_path, 'rb') as f:
-            s3.put_object(Bucket=bucket, Key=os.path.basename(file_path), Body=f, ContentType='application/octet-stream')
+            data = f.read()  # <-- WICHTIG: Bytes statt File-Objekt!
+            s3.put_object(Bucket=bucket, Key=os.path.basename(file_path), Body=data, ContentType='application/octet-stream')
     except ClientError as e:
         logging.error(f"[S3-Upload-Error] {e.response}")
         raise Exception(f"Failed to upload {file_path} to {bucket}/{os.path.basename(file_path)}: {e}")

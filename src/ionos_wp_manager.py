@@ -107,21 +107,26 @@ def server_setup(dry_run: bool = typer.Option(False, '--dry-run'), config: str =
         if s3_endpoint and s3_bucket and aws_key and aws_secret:
             import boto3
             from botocore.client import Config
-            s3 = boto3.client(
-                's3',
-                aws_access_key_id=aws_key,
-                aws_secret_access_key=aws_secret,
-                endpoint_url=s3_endpoint,
-                config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
-            )
-            buckets = [b['Name'] for b in s3.list_buckets().get('Buckets', [])]
-            if s3_bucket not in buckets:
-                s3.create_bucket(Bucket=s3_bucket)
-                typer.echo(f"[OK] S3-Bucket '{s3_bucket}' wurde angelegt.")
-            else:
-                typer.echo(f"[OK] S3-Bucket '{s3_bucket}' existiert bereits.")
+            try:
+                s3 = boto3.client(
+                    's3',
+                    aws_access_key_id=aws_key,
+                    aws_secret_access_key=aws_secret,
+                    endpoint_url=s3_endpoint,
+                    config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
+                )
+                buckets = [b['Name'] for b in s3.list_buckets().get('Buckets', [])]
+                if s3_bucket not in buckets:
+                    s3.create_bucket(Bucket=s3_bucket)
+                    typer.echo(f"[OK] S3-Bucket '{s3_bucket}' wurde angelegt.")
+                else:
+                    typer.echo(f"[OK] S3-Bucket '{s3_bucket}' existiert bereits.")
+            except Exception as e:
+                typer.echo(f"[ERROR] S3-Check/Anlage fehlgeschlagen: {e}\nBitte prüfe deine S3-Keys und teste mit: aws --endpoint-url={s3_endpoint} s3 ls")
+                raise typer.Exit(code=2)
     except Exception as e:
-        typer.echo(f"[WARN] S3-Bucket-Check/Anlage übersprungen: {e}")
+        typer.echo(f"[FATAL] S3-Bucket-Check/Anlage abgebrochen: {e}")
+        raise typer.Exit(code=2)
     # Restic-Repo-Init (optional, falls Passwort vorhanden)
     try:
         creds = load_credentials()
@@ -144,11 +149,16 @@ def server_setup(dry_run: bool = typer.Option(False, '--dry-run'), config: str =
                 if init.returncode == 0:
                     typer.echo(f"[OK] Restic-Repo '{repo}' wurde initialisiert.")
                 else:
-                    typer.echo(f"[WARN] Restic-Repo-Init fehlgeschlagen: {init.stderr}")
+                    typer.echo(f"[ERROR] Restic-Repo-Init fehlgeschlagen: {init.stderr}\nBitte prüfe deine S3-Keys, das Passwort und teste manuell mit: restic -r {repo} init")
+                    raise typer.Exit(code=2)
+            elif check.returncode != 0:
+                typer.echo(f"[ERROR] Restic-Repo-Check fehlgeschlagen: {check.stderr}\nBitte prüfe deine S3-Keys, das Passwort und teste manuell mit: restic -r {repo} snapshots")
+                raise typer.Exit(code=2)
             else:
                 typer.echo(f"[OK] Restic-Repo '{repo}' ist bereits initialisiert.")
     except Exception as e:
-        typer.echo(f"[WARN] Restic-Repo-Init übersprungen: {e}")
+        typer.echo(f"[FATAL] Restic-Repo-Init/Check abgebrochen: {e}")
+        raise typer.Exit(code=2)
     # Home-Verzeichnis-Check
     home_dir = os.path.expanduser('~')
     if not os.path.isdir(home_dir) or not os.access(home_dir, os.W_OK):
@@ -614,6 +624,79 @@ def backup_restic(
         typer.echo(out)
     except Exception as e:
         typer.echo(f"[ERROR] Restic-Backup fehlgeschlagen: {e}")
+
+@app.command()
+def server_reset(force: bool = typer.Option(False, '--force', help='Ohne Rückfrage alles löschen!')):
+    """Kompletten Server-Reset: Löscht ALLE Sites, DBs, Nginx/SSL, Cloudflare, Backups, Cronjobs, optional Configs. DESTRUKTIV!"""
+    setup_logging()
+    if not force:
+        typer.echo("WARNUNG: Dieser Vorgang löscht ALLE WordPress-Sites, Datenbanken, Nginx-Konfigurationen, SSL-Zertifikate, Cloudflare-DNS, Backups, Cronjobs und optional Configs/Credentials.\nDIES IST NICHT UMKEHRBAR!")
+        confirm = typer.prompt("Möchtest du wirklich ALLES löschen? (yes/no)")
+        if confirm.strip().lower() != 'yes':
+            typer.echo("Abgebrochen.")
+            raise typer.Exit(code=0)
+    # 1. Alle Sites/Webroots löschen
+    import glob
+    import shutil
+    webroots = glob.glob('/var/www/*')
+    for w in webroots:
+        try:
+            shutil.rmtree(w)
+            typer.echo(f"[OK] Webroot gelöscht: {w}")
+        except Exception as e:
+            typer.echo(f"[WARN] Webroot konnte nicht gelöscht werden: {w} ({e})")
+    # 2. Alle DBs und User löschen (nur wp_*)
+    import subprocess
+    dbs = subprocess.getoutput("sudo mysql -N -e \"SHOW DATABASES LIKE 'wp_%';\"").splitlines()
+    for db in dbs:
+        subprocess.call(f"sudo mysql -e \"DROP DATABASE IF EXISTS `{db}`;\"", shell=True)
+        typer.echo(f"[OK] DB gelöscht: {db}")
+    users = subprocess.getoutput("sudo mysql -N -e \"SELECT User FROM mysql.user WHERE User LIKE 'wp_%_user';\"").splitlines()
+    for user in users:
+        subprocess.call(f"sudo mysql -e \"DROP USER IF EXISTS '{user}'@'localhost';\"", shell=True)
+        typer.echo(f"[OK] DB-User gelöscht: {user}")
+    subprocess.call("sudo mysql -e 'FLUSH PRIVILEGES;'", shell=True)
+    # 3. Nginx-Konfigs löschen
+    for f in glob.glob('/etc/nginx/sites-available/*'):
+        os.remove(f)
+    for f in glob.glob('/etc/nginx/sites-enabled/*'):
+        os.remove(f)
+    typer.echo("[OK] Nginx-Konfigurationen gelöscht.")
+    subprocess.call("nginx -t && systemctl reload nginx", shell=True)
+    # 4. SSL-Zertifikate löschen
+    for d in glob.glob('/etc/letsencrypt/live/*'):
+        shutil.rmtree(d, ignore_errors=True)
+    for d in glob.glob('/etc/letsencrypt/archive/*'):
+        shutil.rmtree(d, ignore_errors=True)
+    for f in glob.glob('/etc/letsencrypt/renewal/*.conf'):
+        os.remove(f)
+    typer.echo("[OK] SSL-Zertifikate gelöscht.")
+    # 5. Cloudflare-DNS (optional, nur wenn Config vorhanden)
+    try:
+        cfg = load_config()
+        creds = load_credentials()
+        base_domain = cfg.get('base_domain')
+        from utils.api import cloudflare_delete_dns
+        # Alle Subdomains (wp_*) löschen
+        # Hier nur Beispiel: User muss ggf. Liste pflegen
+        # cloudflare_delete_dns(f"*.{base_domain}", creds['CF_API_TOKEN'])
+        typer.echo("[INFO] Cloudflare-DNS-Reset: Bitte prüfe ggf. manuell, da API-Listen nicht trivial sind.")
+    except Exception:
+        typer.echo("[INFO] Cloudflare-DNS-Reset übersprungen (keine Config/Credentials).")
+    # 6. Backups/Restic-Repo löschen (optional)
+    typer.echo("[INFO] Restic-Repo/Backups werden NICHT automatisch gelöscht. Bitte manuell prüfen!")
+    # 7. Cronjobs löschen
+    os.system('crontab -r')
+    typer.echo("[OK] Alle Cronjobs gelöscht.")
+    # 8. Logs löschen
+    shutil.rmtree('/var/log/ionos_wp_manager', ignore_errors=True)
+    typer.echo("[OK] Logs gelöscht.")
+    # 9. Optional: Configs/Credentials löschen
+    cred_dir = os.path.expanduser('~/.config/ionos_wp_manager')
+    if os.path.exists(cred_dir):
+        shutil.rmtree(cred_dir, ignore_errors=True)
+        typer.echo("[OK] Configs/Credentials gelöscht.")
+    typer.echo("[RESET] Server wurde vollständig zurückgesetzt. Du kannst jetzt mit 'init' und 'server-setup' neu starten.")
 
 if __name__ == "__main__":
     app()

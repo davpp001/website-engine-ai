@@ -3,6 +3,12 @@ import os
 import time
 import boto3
 
+def get_public_ip():
+    try:
+        return requests.get('https://api.ipify.org').text.strip()
+    except Exception:
+        return None
+
 def cloudflare_create_dns(domain, ip, token):
     # Cloudflare API: Create A record
     zone_id = get_cloudflare_zone_id(domain, token)
@@ -57,8 +63,21 @@ def get_cloudflare_record_id(domain, token, zone_id):
     return resp.json()["result"][0]["id"]
 
 def certbot_issue_ssl(domain, cf_token):
-    # certbot certonly --dns-cloudflare ...
-    pass
+    import subprocess
+    import os
+    # Schreibe temporäre Cloudflare-API-Token-Datei
+    cf_creds_path = f"/tmp/cf_{domain}.ini"
+    with open(cf_creds_path, 'w') as f:
+        f.write(f'dns_cloudflare_api_token = {cf_token}\n')
+    os.chmod(cf_creds_path, 0o600)
+    cmd = [
+        'certbot', 'certonly', '--dns-cloudflare', f'--dns-cloudflare-credentials={cf_creds_path}',
+        '--dns-cloudflare-propagation-seconds=60', '-d', domain, '--non-interactive', '--agree-tos', '-m', f'admin@{domain}', '--keep-until-expiring'
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise Exception(f'Certbot-Fehler: {result.stderr}')
+    return result.stdout
 
 def s3_upload_backup(file_path, bucket, aws_key, aws_secret):
     s3 = boto3.client('s3', aws_access_key_id=aws_key, aws_secret_access_key=aws_secret)

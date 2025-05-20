@@ -115,8 +115,51 @@ def create_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
             log_json({"dry-run": True, "action": "create-site", "domain": full_domain}, level='INFO')
             typer.echo(f"[DRY-RUN] DNS, SSL, DB, WP würden für {full_domain} angelegt.")
             return
-        cloudflare_create_dns(full_domain, '1.2.3.4', creds['CF_API_TOKEN'])
-        certbot_issue_ssl(full_domain, creds['CF_API_TOKEN'])
+        from utils.api import get_public_ip
+        public_ip = get_public_ip()
+        if not public_ip:
+            typer.echo("[ERROR] Konnte öffentliche Server-IP nicht ermitteln. DNS-Setup abgebrochen.")
+            raise typer.Exit(code=2)
+        try:
+            cf_result = cloudflare_create_dns(full_domain, public_ip, creds['CF_API_TOKEN'])
+            log_json({"cloudflare_dns_result": cf_result}, level='INFO')
+        except Exception as e:
+            typer.echo(f"[ERROR] Cloudflare DNS-Setup fehlgeschlagen: {e}")
+            raise typer.Exit(code=2)
+        # SSL-Zertifikat
+        try:
+            ssl_result = certbot_issue_ssl(full_domain, creds['CF_API_TOKEN'])
+            log_json({"certbot_result": ssl_result}, level='INFO')
+        except Exception as e:
+            typer.echo(f"[ERROR] SSL-Zertifikat konnte nicht ausgestellt werden: {e}")
+            raise typer.Exit(code=2)
+        # SSL in Nginx einbinden
+        ssl_conf = f"""
+server {{
+    listen 443 ssl;
+    server_name {full_domain};
+    root /var/www/{prefix};
+    index index.php index.html index.htm;
+    ssl_certificate /etc/letsencrypt/live/{full_domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{full_domain}/privkey.pem;
+    include snippets/fastcgi-php.conf;
+    location / {{
+        try_files $uri $uri/ /index.php?$args;
+    }}
+    location ~ \.php$ {{
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
+    }}
+    location ~ /\.ht {{
+        deny all;
+    }}
+}}
+"""
+        ssl_conf_path = f"/etc/nginx/sites-available/{full_domain}_ssl"
+        with open(ssl_conf_path, 'w') as f:
+            f.write(ssl_conf)
+        os.system(f"ln -sf {ssl_conf_path} /etc/nginx/sites-enabled/{full_domain}_ssl")
+        os.system("nginx -t && systemctl reload nginx")
         webroot = f"/var/www/{prefix}"
         os.makedirs(webroot, exist_ok=True)
         os.chmod(webroot, 0o750)
@@ -132,6 +175,33 @@ def create_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
         os.system(f"wp core install --url=https://{full_domain} --title='{prefix}' --admin_user=admin_{prefix} --admin_password={admin_pass} --admin_email=admin@{base_domain} --path={webroot}")
         log_json({"url": f"https://{full_domain}", "admin_user": f"admin_{prefix}", "admin_password": admin_pass}, level='INFO')
         typer.echo(f"Site {full_domain} erfolgreich angelegt.")
+        # Nginx-Konfiguration
+        nginx_conf = f"""
+server {{
+    listen 80;
+    server_name {full_domain};
+    root /var/www/{prefix};
+    index index.php index.html index.htm;
+
+    location / {{
+        try_files $uri $uri/ /index.php?$args;
+    }}
+
+    location ~ \.php$ {{
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
+    }}
+
+    location ~ /\.ht {{
+        deny all;
+    }}
+}}
+"""
+        conf_path = f"/etc/nginx/sites-available/{full_domain}"
+        with open(conf_path, 'w') as f:
+            f.write(nginx_conf)
+        os.system(f"ln -sf {conf_path} /etc/nginx/sites-enabled/{full_domain}")
+        os.system("nginx -t && systemctl reload nginx")
     try:
         do_create()
     except Exception as e:

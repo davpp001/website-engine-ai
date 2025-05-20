@@ -94,22 +94,45 @@ def certbot_issue_ssl(domain, cf_token):
     return result.stdout
 
 def s3_upload_backup(file_path, bucket, aws_key, aws_secret, s3_endpoint=None):
-    if s3_endpoint:
-        s3 = boto3.client(
-            's3',
-            aws_access_key_id=aws_key,
-            aws_secret_access_key=aws_secret,
-            endpoint_url=s3_endpoint,
-            config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
-        )
-    else:
-        s3 = boto3.client(
-            's3',
-            aws_access_key_id=aws_key,
-            aws_secret_access_key=aws_secret,
-            config=Config(signature_version='s3v4')
-        )
-    s3.upload_file(file_path, bucket, os.path.basename(file_path))
+    import logging
+    import traceback
+    from botocore.exceptions import ClientError
+    # Region für IONOS S3 ableiten
+    region = None
+    if s3_endpoint and 'ionoscloud.com' in s3_endpoint:
+        # Versuche Region aus Endpoint zu extrahieren
+        import re
+        m = re.search(r's3\.(eu-central-\d)\.', s3_endpoint)
+        if m:
+            region = m.group(1)
+        else:
+            # Fallback: eu-central-1 oder eu-central-3
+            region = 'eu-central-1'
+    try:
+        logging.info(f"[DEBUG] S3-Upload: file={file_path}, bucket={bucket}, endpoint={s3_endpoint}, region={region}")
+        if s3_endpoint:
+            s3 = boto3.client(
+                's3',
+                aws_access_key_id=aws_key,
+                aws_secret_access_key=aws_secret,
+                endpoint_url=s3_endpoint,
+                region_name=region,
+                config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
+            )
+        else:
+            s3 = boto3.client(
+                's3',
+                aws_access_key_id=aws_key,
+                aws_secret_access_key=aws_secret,
+                config=Config(signature_version='s3v4')
+            )
+        s3.upload_file(file_path, bucket, os.path.basename(file_path))
+    except ClientError as e:
+        logging.error(f"[S3-Upload-Error] {e.response}")
+        raise Exception(f"Failed to upload {file_path} to {bucket}/{os.path.basename(file_path)}: {e}")
+    except Exception as e:
+        logging.error(traceback.format_exc())
+        raise Exception(f"Failed to upload {file_path} to {bucket}/{os.path.basename(file_path)}: {e}")
 
 def ionos_create_snapshot(server_id, token):
     # ionos-cli or REST

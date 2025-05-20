@@ -44,3 +44,23 @@ ionosctl --version
 # 10. Fertig
 
 echo "\n[OK] Server-Setup abgeschlossen. Alle Tools installiert."
+
+# 11. Config-Setup (interaktiv, falls nicht vorhanden)
+CONFIG_DIR="$HOME/.config/ionos_wp_manager"
+CONFIG_FILE="$CONFIG_DIR/config.yml"
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "[INFO] Lege initiale Konfigurationsdatei an: $CONFIG_FILE"
+  mkdir -p "$CONFIG_DIR"
+  read -p "Bitte gib deine BASE_DOMAIN (z.B. example.com) ein: " BASE_DOMAIN
+  read -p "Bitte gib deinen S3-Bucket-Namen ein: " S3_BUCKET
+  read -p "Bitte gib das gewünschte Log-Level ein [INFO]: " LOG_LEVEL
+  LOG_LEVEL=${LOG_LEVEL:-INFO}
+  cat > "$CONFIG_FILE" <<EOF
+base_domain: $BASE_DOMAIN
+s3_bucket: $S3_BUCKET
+log_level: $LOG_LEVEL
+EOF
+  echo "[OK] Konfigurationsdatei wurde erstellt."
+else
+  echo "[INFO] Konfigurationsdatei existiert bereits: $CONFIG_FILE"
+fi

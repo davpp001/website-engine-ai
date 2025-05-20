@@ -3,7 +3,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '')))
 
 import typer
-from utils.config import (load_config, save_credentials, validate_prefix)
+from utils.config import (load_config, save_credentials, validate_prefix, load_credentials)
 from utils.locking import with_lock
 from utils.logging import setup_logging, log_json
 from utils.api import (
@@ -92,10 +92,21 @@ def create_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
     except Exception as e:
         typer.echo(f"Ungültiger Prefix: {e}")
         raise typer.Exit(code=2)
-    cfg = load_config(config)
-    base_domain = cfg.get('base_domain', os.getenv('BASE_DOMAIN'))
+    try:
+        cfg = load_config(config)
+    except Exception as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=2)
+    base_domain = cfg.get('base_domain')
+    if not base_domain:
+        typer.echo("[ERROR] base_domain fehlt in der Config. Bitte Setup-Skript ausführen oder Config ergänzen.")
+        raise typer.Exit(code=2)
     full_domain = f"{prefix}.{base_domain}"
-    creds = load_config(os.path.expanduser('~/.config/ionos_wp_manager/credentials'))
+    try:
+        creds = load_credentials()
+    except Exception as e:
+        typer.echo(str(e))
+        raise typer.Exit(code=2)
     lockfile = f"/tmp/ionos_wp_manager_create_{prefix}.lock"
     @with_lock(lockfile)
     def do_create():

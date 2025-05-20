@@ -8,7 +8,7 @@ from utils.locking import with_lock
 from utils.logging import setup_logging, log_json
 from utils.api import (
     cloudflare_create_dns, cloudflare_delete_dns, certbot_issue_ssl,
-    s3_upload_backup, ionos_create_snapshot, ionos_rotate_snapshots
+    s3_upload_backup, ionos_create_snapshot, ionos_rotate_snapshots, run_restic_backup
 )
 from utils.security import ensure_permissions, encrypt_secrets
 
@@ -487,6 +487,46 @@ def snapshot(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typ
         log_json({"snapshot_id": snap_id, "status": "ok"}, level='INFO')
         typer.echo(f"Snapshot {snap_id} erstellt und Rotation durchgeführt.")
     do_snapshot()
+
+@app.command()
+def backup_restic(
+    sources: str = typer.Option("/etc/hosts", help="Kommagetrennte Liste der Backup-Quellen (z.B. /etc,/var/www)"),
+    repo: str = typer.Option(None, help="Restic-Repo (z.B. s3:s3.eu-central-3.ionoscloud.com/my-backups)"),
+    password: str = typer.Option(None, help="Restic-Repo-Passwort"),
+    config: str = typer.Option(None, '--config'),
+    dry_run: bool = typer.Option(False, '--dry-run'),
+):
+    """Backup per Restic zu S3-kompatiblem Backend (empfohlen für IONOS S3)"""
+    setup_logging()
+    import datetime
+    now = datetime.datetime.now().strftime('%Y-%m-%d')
+    creds = load_credentials()
+    cfg = load_config(config)
+    s3_endpoint = cfg.get('s3_endpoint', creds.get('S3_ENDPOINT'))
+    aws_key = creds.get('AWS_ACCESS_KEY_ID')
+    aws_secret = creds.get('AWS_SECRET_ACCESS_KEY')
+    backup_sources = [x.strip() for x in sources.split(",") if x.strip()]
+    restic_repo = repo or f"s3:{s3_endpoint.replace('https://','').replace('http://','')}/{cfg.get('s3_bucket')}"
+    restic_password = password or os.getenv('RESTIC_PASSWORD') or "changeme123"
+    log_path = f"/var/log/ionos_wp_manager/restic-backup-{now}.log"
+    if dry_run:
+        typer.echo(f"[DRY-RUN] Restic-Backup würde ausgeführt: {restic_repo} -> {backup_sources}")
+        return
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        out = run_restic_backup(
+            repo=restic_repo,
+            password=restic_password,
+            sources=backup_sources,
+            aws_key=aws_key,
+            aws_secret=aws_secret,
+            endpoint=s3_endpoint,
+            log_path=log_path
+        )
+        typer.echo(f"[OK] Restic-Backup abgeschlossen. Log: {log_path}")
+        typer.echo(out)
+    except Exception as e:
+        typer.echo(f"[ERROR] Restic-Backup fehlgeschlagen: {e}")
 
 if __name__ == "__main__":
     app()

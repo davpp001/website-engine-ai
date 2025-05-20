@@ -107,6 +107,7 @@ def s3_upload_backup(file_path, bucket, aws_key, aws_secret, s3_endpoint=None):
             region = 'eu-central-1'
     try:
         logging.info(f"[DEBUG] S3-Upload: file={file_path}, bucket={bucket}, endpoint={s3_endpoint}, region={region}, key={aws_key[:4]}***, secret=***")
+        config = Config(signature_version='s3v4', s3={'addressing_style': 'path'}, payload_signing_enabled=True)
         if s3_endpoint:
             s3 = boto3.client(
                 's3',
@@ -114,14 +115,15 @@ def s3_upload_backup(file_path, bucket, aws_key, aws_secret, s3_endpoint=None):
                 aws_secret_access_key=aws_secret,
                 endpoint_url=s3_endpoint,
                 region_name=region,
-                config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
+                use_ssl=True,
+                config=config
             )
         else:
             s3 = boto3.client(
                 's3',
                 aws_access_key_id=aws_key,
                 aws_secret_access_key=aws_secret,
-                config=Config(signature_version='s3v4')
+                config=config
             )
         with open(file_path, 'rb') as f:
             s3.put_object(Bucket=bucket, Key=os.path.basename(file_path), Body=f, ContentType='application/octet-stream')
@@ -139,3 +141,46 @@ def ionos_create_snapshot(server_id, token):
 def ionos_rotate_snapshots(server_id, token, retention_days=28):
     # Delete old snapshots
     pass
+
+def run_restic_backup(
+    repo: str,
+    password: str,
+    sources: list,
+    aws_key: str,
+    aws_secret: str,
+    endpoint: str = None,
+    extra_env: dict = None,
+    log_path: str = None
+):
+    """
+    Führt ein Restic-Backup zu einem S3-kompatiblen Backend aus.
+    sources: Liste der zu sichernden Verzeichnisse/Dateien
+    """
+    import subprocess
+    import shlex
+    import logging
+    env = os.environ.copy()
+    env["RESTIC_REPOSITORY"] = repo
+    env["RESTIC_PASSWORD"] = password
+    env["AWS_ACCESS_KEY_ID"] = aws_key
+    env["AWS_SECRET_ACCESS_KEY"] = aws_secret
+    if endpoint:
+        # Restic erwartet nur Host, kein https://
+        endpoint_host = endpoint.replace("https://", "").replace("http://", "")
+        env["RESTIC_REPOSITORY"] = f"s3:{endpoint_host}/{repo.split('/')[-1]}"
+    if extra_env:
+        env.update(extra_env)
+    cmd = ["restic", "backup"] + sources
+    try:
+        logging.info(f"[Restic] Starte Backup: {' '.join(shlex.quote(x) for x in cmd)}")
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        if log_path:
+            with open(log_path, "a") as lf:
+                lf.write(result.stdout)
+                lf.write(result.stderr)
+        if result.returncode != 0:
+            raise Exception(f"Restic-Backup fehlgeschlagen: {result.stderr}")
+        return result.stdout
+    except Exception as e:
+        logging.error(f"[Restic-Backup-Error] {e}")
+        raise

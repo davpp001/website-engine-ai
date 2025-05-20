@@ -267,8 +267,16 @@ FLUSH PRIVILEGES;
         with open('/tmp/wp_delete.sql', 'w') as f:
             f.write(sql)
         os.system("sudo mysql < /tmp/wp_delete.sql")
-        # Webroot löschen
-        os.system(f"rm -rf /var/www/{prefix}")
+        # Webroot löschen und prüfen
+        webroot = f"/var/www/{prefix}"
+        if os.path.exists(webroot):
+            os.system(f"rm -rf {webroot}")
+            if os.path.exists(webroot):
+                typer.echo(f"[WARN] Webroot {webroot} konnte nicht gelöscht werden!")
+            else:
+                typer.echo(f"[OK] Webroot {webroot} gelöscht.")
+        else:
+            typer.echo(f"[INFO] Webroot {webroot} war nicht vorhanden.")
         # Nginx-Konfig löschen
         os.system(f"rm -f /etc/nginx/sites-available/{full_domain} /etc/nginx/sites-enabled/{full_domain}")
         os.system(f"rm -f /etc/nginx/sites-available/{full_domain}_ssl /etc/nginx/sites-enabled/{full_domain}_ssl")

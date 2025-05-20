@@ -24,6 +24,15 @@ def cloudflare_create_dns(domain, ip, token):
         "ttl": 120,
         "proxied": False
     }
+    # Prüfe, ob der Record schon existiert
+    existing = get_cloudflare_record_id(domain, token, zone_id)
+    if existing:
+        # Update statt create
+        url_update = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{existing}"
+        resp = requests.put(url_update, headers=headers, json=data)
+        if not resp.ok:
+            raise Exception(f"Cloudflare DNS update failed: {resp.text}")
+        return resp.json()
     resp = requests.post(url, headers=headers, json=data)
     if not resp.ok:
         raise Exception(f"Cloudflare DNS create failed: {resp.text}")
@@ -47,11 +56,15 @@ def get_cloudflare_zone_id(domain, token):
     base = ".".join(domain.split(".")[-2:])
     url = "https://api.cloudflare.com/client/v4/zones"
     headers = {"Authorization": f"Bearer {token}"}
-    params = {"name": base}
+    params = {"name": base, "per_page": 50}
     resp = requests.get(url, headers=headers, params=params)
     if not resp.ok or not resp.json().get("result"):
         raise Exception(f"Cloudflare zone lookup failed: {resp.text}")
-    return resp.json()["result"][0]["id"]
+    # Suche nach exakter Zone
+    for zone in resp.json()["result"]:
+        if zone["name"] == base:
+            return zone["id"]
+    raise Exception(f"Cloudflare zone {base} nicht gefunden. Bitte prüfe, ob die Domain in deinem Cloudflare-Account existiert.")
 
 def get_cloudflare_record_id(domain, token, zone_id):
     url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"

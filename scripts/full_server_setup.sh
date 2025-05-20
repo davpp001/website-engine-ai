@@ -15,8 +15,8 @@ apt update
 apt install -y php8.2-fpm nginx mariadb-server fail2ban python3-pip git snapd
 systemctl enable --now nginx php8.2-fpm mariadb fail2ban
 
-# 4. Certbot
-apt install -y certbot
+# 4. Certbot + Cloudflare DNS Plugin
+apt install -y certbot python3-certbot-dns-cloudflare
 
 # 5. WP-CLI
 curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar

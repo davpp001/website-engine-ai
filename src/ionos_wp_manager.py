@@ -108,6 +108,8 @@ def create_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
         typer.echo(str(e))
         raise typer.Exit(code=2)
     lockfile = f"/tmp/ionos_wp_manager_create_{prefix}.lock"
+    db_name = f"wp_{prefix}"
+    db_user = f"wp_{prefix}_user"
     @with_lock(lockfile)
     def do_create():
         # DNS
@@ -164,10 +166,7 @@ server {{
         os.makedirs(webroot, exist_ok=True)
         os.chmod(webroot, 0o750)
         # DB anlegen (MariaDB)
-        db_name = f"wp_{prefix}"
-        db_user = f"wp_{prefix}_user"
         db_pass = os.urandom(12).hex()
-        # Backticks für DB- und Usernamen mit Bindestrich
         os.system(f"sudo mysql -e \"CREATE DATABASE IF NOT EXISTS `{db_name}`; CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{db_pass}'; GRANT ALL ON `{db_name}`.* TO '{db_user}'@'localhost'; FLUSH PRIVILEGES;\"")
         # WP-CLI (immer mit --allow-root, falls root)
         wp_root = "--allow-root" if os.geteuid() == 0 else ""

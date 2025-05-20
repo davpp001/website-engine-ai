@@ -12,7 +12,7 @@ add-apt-repository ppa:ondrej/php -y
 apt update
 
 # 3. Hauptpakete
-apt install -y php8.2-fpm nginx mariadb-server fail2ban python3-pip git snapd
+apt install -y php8.2-fpm php8.2-mysql nginx mariadb-server fail2ban python3-pip git snapd
 systemctl enable --now nginx php8.2-fpm mariadb fail2ban
 
 # 4. Certbot + Cloudflare DNS Plugin

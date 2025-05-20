@@ -341,14 +341,51 @@ def backup(auto: bool = typer.Option(False, '--auto'), manual: bool = typer.Opti
             log_json({"dry-run": True, "db_file": db_file, "wp_tar": wp_tar, "s3_bucket": s3_bucket}, level='INFO')
             typer.echo("[DRY-RUN] Backup würde durchgeführt.")
             return
-        os.system(f"mysqldump --all-databases > {db_file}")
-        os.system(f"tar czf {wp_tar} /var/www/*/wp-content")
-        s3_upload_backup(db_file, s3_bucket, creds.get('AWS_ACCESS_KEY_ID'), creds.get('AWS_SECRET_ACCESS_KEY'))
-        s3_upload_backup(wp_tar, s3_bucket, creds.get('AWS_ACCESS_KEY_ID'), creds.get('AWS_SECRET_ACCESS_KEY'))
+        # DB-Backup
+        ret_db = os.system(f"mysqldump --all-databases > {db_file}")
+        if ret_db != 0 or not os.path.exists(db_file):
+            log_json({"status": "error", "step": "mysqldump", "file": db_file}, level='ERROR')
+            typer.echo(f"[ERROR] DB-Backup fehlgeschlagen: {db_file}")
+            return
+        # WP-Content-Backup
+        ret_tar = os.system(f"tar czf {wp_tar} /var/www/*/wp-content")
+        if ret_tar != 0 or not os.path.exists(wp_tar):
+            log_json({"status": "error", "step": "tar", "file": wp_tar}, level='ERROR')
+            typer.echo(f"[ERROR] WP-Content-Backup fehlgeschlagen: {wp_tar}")
+            if os.path.exists(db_file):
+                os.remove(db_file)
+            return
+        # S3-Upload DB
+        try:
+            s3_upload_backup(db_file, s3_bucket, creds.get('AWS_ACCESS_KEY_ID'), creds.get('AWS_SECRET_ACCESS_KEY'))
+        except Exception as e:
+            log_json({"status": "error", "step": "s3_upload_db", "error": str(e)}, level='ERROR')
+            typer.echo(f"[ERROR] S3-Upload DB fehlgeschlagen: {e}")
+            if os.path.exists(db_file):
+                os.remove(db_file)
+            if os.path.exists(wp_tar):
+                os.remove(wp_tar)
+            return
+        # S3-Upload WP-Content
+        try:
+            s3_upload_backup(wp_tar, s3_bucket, creds.get('AWS_ACCESS_KEY_ID'), creds.get('AWS_SECRET_ACCESS_KEY'))
+        except Exception as e:
+            log_json({"status": "error", "step": "s3_upload_wp", "error": str(e)}, level='ERROR')
+            typer.echo(f"[ERROR] S3-Upload WP-Content fehlgeschlagen: {e}")
+            if os.path.exists(db_file):
+                os.remove(db_file)
+            if os.path.exists(wp_tar):
+                os.remove(wp_tar)
+            return
+        # Aufräumen
+        if os.path.exists(db_file):
+            os.remove(db_file)
+        if os.path.exists(wp_tar):
+            os.remove(wp_tar)
         os.makedirs('/var/log/ionos_wp_manager', exist_ok=True)
         with open(log_path, 'w') as lf:
             lf.write(f"Backup {now} erfolgreich\n")
-        log_json({"s3_paths": [db_file, wp_tar], "log_path": log_path}, level='INFO')
+        log_json({"s3_paths": [db_file, wp_tar], "log_path": log_path, "status": "ok"}, level='INFO')
         typer.echo(f"Backup abgeschlossen. Log: {log_path}")
     do_backup()
 

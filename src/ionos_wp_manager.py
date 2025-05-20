@@ -114,7 +114,17 @@ def create_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
         db_user = f"wp_{prefix}_user"
         db_pass = os.urandom(12).hex()
         print(f"DEBUG: db_name={db_name}, db_user={db_user}, db_pass={db_pass}")
-        print(f"DEBUG: SQL: sudo mysql -e \"CREATE DATABASE IF NOT EXISTS `{db_name}`; CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{db_pass}'; GRANT ALL ON `{db_name}`.* TO '{db_user}'@'localhost'; FLUSH PRIVILEGES;\"")
+        sql = f'''
+CREATE DATABASE IF NOT EXISTS `{db_name}`;
+CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{db_pass}';
+GRANT ALL ON `{db_name}`.* TO '{db_user}'@'localhost';
+FLUSH PRIVILEGES;
+'''
+        with open('/tmp/wp_create.sql', 'w') as f:
+            f.write(sql)
+        print(f"DEBUG: SQL-File written to /tmp/wp_create.sql:")
+        print(sql)
+        os.system("sudo mysql < /tmp/wp_create.sql")
         # DNS
         if dry_run:
             log_json({"dry-run": True, "action": "create-site", "domain": full_domain}, level='INFO')
@@ -213,7 +223,14 @@ server {{
     except Exception as e:
         db_name = f"wp_{prefix}"
         db_user = f"wp_{prefix}_user"
-        os.system(f"sudo mysql -e \"DROP DATABASE IF EXISTS `{db_name}`; DROP USER IF EXISTS '{db_user}'@'localhost';\"")
+        sql = f'''
+DROP DATABASE IF EXISTS `{db_name}`;
+DROP USER IF EXISTS '{db_user}'@'localhost';
+FLUSH PRIVILEGES;
+'''
+        with open('/tmp/wp_delete.sql', 'w') as f:
+            f.write(sql)
+        os.system("sudo mysql < /tmp/wp_delete.sql")
         os.system(f"rm -rf /var/www/{prefix}")
         cloudflare_delete_dns(full_domain, creds['CF_API_TOKEN'])
         log_json({"status": "rollback", "error": str(e)}, level='ERROR')
@@ -242,7 +259,14 @@ def delete_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
             return
         db_name = f"wp_{prefix}"
         db_user = f"wp_{prefix}_user"
-        os.system(f"sudo mysql -e \"DROP DATABASE IF EXISTS `{db_name}`; DROP USER IF EXISTS '{db_user}'@'localhost'; FLUSH PRIVILEGES;\"")
+        sql = f'''
+DROP DATABASE IF EXISTS `{db_name}`;
+DROP USER IF EXISTS '{db_user}'@'localhost';
+FLUSH PRIVILEGES;
+'''
+        with open('/tmp/wp_delete.sql', 'w') as f:
+            f.write(sql)
+        os.system("sudo mysql < /tmp/wp_delete.sql")
         # Webroot löschen
         os.system(f"rm -rf /var/www/{prefix}")
         # Nginx-Konfig löschen

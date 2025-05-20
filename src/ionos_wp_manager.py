@@ -237,8 +237,15 @@ def delete_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
             log_json({"dry-run": True, "action": "delete-site", "domain": full_domain}, level='INFO')
             typer.echo(f"[DRY-RUN] Site {full_domain} würde gelöscht.")
             return
-        os.system(f"wp db drop --yes --path=/var/www/{prefix}")
+        # Datenbank und User explizit löschen
+        os.system(f"sudo mysql -e \"DROP DATABASE IF EXISTS wp_{prefix}; DROP USER IF EXISTS 'wp_{prefix}_user'@'localhost'; FLUSH PRIVILEGES;\"")
+        # Webroot löschen
         os.system(f"rm -rf /var/www/{prefix}")
+        # Nginx-Konfig löschen
+        os.system(f"rm -f /etc/nginx/sites-available/{full_domain} /etc/nginx/sites-enabled/{full_domain}")
+        os.system(f"rm -f /etc/nginx/sites-available/{full_domain}_ssl /etc/nginx/sites-enabled/{full_domain}_ssl")
+        os.system("nginx -t && systemctl reload nginx")
+        # DNS löschen
         cloudflare_delete_dns(full_domain, creds['CF_API_TOKEN'])
         log_json({"status": "deleted", "domain": full_domain}, level='INFO')
         typer.echo(f"Site {full_domain} gelöscht.")

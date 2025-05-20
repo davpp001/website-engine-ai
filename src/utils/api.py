@@ -100,7 +100,7 @@ def s3_upload_backup(file_path, bucket, aws_key, aws_secret, s3_endpoint=None):
             aws_access_key_id=aws_key,
             aws_secret_access_key=aws_secret,
             endpoint_url=s3_endpoint,
-            config=Config(signature_version='s3v4')
+            config=Config(signature_version='s3v4', s3={'addressing_style': 'path'})
         )
     else:
         s3 = boto3.client(

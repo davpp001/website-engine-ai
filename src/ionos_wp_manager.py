@@ -229,7 +229,7 @@ def delete_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
     cfg = load_config(config)
     base_domain = cfg.get('base_domain', os.getenv('BASE_DOMAIN'))
     full_domain = f"{prefix}.{base_domain}"
-    creds = load_config(os.path.expanduser('~/.config/ionos_wp_manager/credentials'))
+    creds = load_credentials()
     lockfile = f"/tmp/ionos_wp_manager_delete_{prefix}.lock"
     @with_lock(lockfile)
     def do_delete():

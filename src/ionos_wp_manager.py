@@ -21,10 +21,12 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
     typer.echo("Willkommen zum IONOS WP Manager Init-Wizard!")
     cf_token = typer.prompt("Cloudflare API Token", hide_input=True)
     ionos_token = typer.prompt("IONOS API Token", hide_input=True)
+    aws_key = typer.prompt("AWS Access Key ID", hide_input=True)
+    aws_secret = typer.prompt("AWS Secret Access Key", hide_input=True)
     ssh_key_path = typer.prompt("Pfad zum SSH Private Key", default=os.path.expanduser("~/.ssh/id_rsa"))
     # Validierung
-    if not cf_token or not ionos_token:
-        typer.echo("API-Tokens dürfen nicht leer sein.")
+    if not cf_token or not ionos_token or not aws_key or not aws_secret:
+        typer.echo("API-Tokens und AWS-Credentials dürfen nicht leer sein.")
         raise typer.Exit(code=2)
     if not os.path.exists(ssh_key_path):
         typer.echo(f"SSH-Key nicht gefunden: {ssh_key_path}")
@@ -32,6 +34,8 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
     creds = {
         'CF_API_TOKEN': cf_token,
         'IONOS_API_TOKEN': ionos_token,
+        'AWS_ACCESS_KEY_ID': aws_key,
+        'AWS_SECRET_ACCESS_KEY': aws_secret,
         'SSH_KEY_PATH': ssh_key_path
     }
     if dry_run:

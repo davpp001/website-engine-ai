@@ -101,6 +101,41 @@ def create_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
     if not base_domain:
         typer.echo("[ERROR] base_domain fehlt in der Config. Bitte Setup-Skript ausführen oder Config ergänzen.")
         raise typer.Exit(code=2)
+
+    # --- Automatische Suffix-Nummerierung ---
+    import glob
+    import re
+    orig_prefix = prefix
+    def resource_exists(pfx):
+        webroot = f"/var/www/{pfx}"
+        db_name = f"wp_{pfx}"
+        db_user = f"wp_{pfx}_user"
+        # Webroot
+        if os.path.exists(webroot):
+            return True
+        # DB
+        db_check = os.popen(f"sudo mysql -N -e \"SHOW DATABASES LIKE '{db_name}';\"").read().strip()
+        if db_check:
+            return True
+        # User
+        user_check = os.popen(f"sudo mysql -N -e \"SELECT User FROM mysql.user WHERE User='{db_user}';\"").read().strip()
+        if user_check:
+            return True
+        # Nginx config
+        conf_path = f"/etc/nginx/sites-available/{pfx}.{base_domain}"
+        if os.path.exists(conf_path):
+            return True
+        # DNS (Cloudflare): nicht geprüft, da API-Call nötig
+        return False
+    # Suffix-Logik
+    suffix = 0
+    candidate = prefix
+    while resource_exists(candidate):
+        suffix += 1
+        candidate = f"{orig_prefix}{suffix+1 if suffix > 0 else ''}"
+    if candidate != prefix:
+        typer.echo(f"[INFO] Prefix '{prefix}' existiert bereits, verwende stattdessen '{candidate}'.")
+    prefix = candidate
     full_domain = f"{prefix}.{base_domain}"
     try:
         creds = load_credentials()

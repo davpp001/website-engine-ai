@@ -2,6 +2,7 @@ import requests
 import os
 import time
 import boto3
+from botocore.client import Config
 
 def get_public_ip():
     try:
@@ -94,9 +95,20 @@ def certbot_issue_ssl(domain, cf_token):
 
 def s3_upload_backup(file_path, bucket, aws_key, aws_secret, s3_endpoint=None):
     if s3_endpoint:
-        s3 = boto3.client('s3', aws_access_key_id=aws_key, aws_secret_access_key=aws_secret, endpoint_url=s3_endpoint)
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=aws_key,
+            aws_secret_access_key=aws_secret,
+            endpoint_url=s3_endpoint,
+            config=Config(signature_version='s3v4')
+        )
     else:
-        s3 = boto3.client('s3', aws_access_key_id=aws_key, aws_secret_access_key=aws_secret)
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=aws_key,
+            aws_secret_access_key=aws_secret,
+            config=Config(signature_version='s3v4')
+        )
     s3.upload_file(file_path, bucket, os.path.basename(file_path))
 
 def ionos_create_snapshot(server_id, token):

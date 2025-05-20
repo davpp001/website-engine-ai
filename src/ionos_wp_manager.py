@@ -76,6 +76,11 @@ def server_setup(dry_run: bool = typer.Option(False, '--dry-run'), config: str =
     """Server-Grundinstallation und Härtung (inkl. Python-Abhängigkeiten, Restic, Tools, S3-Bucket-Check)"""
     setup_logging()
     summary = {}
+    # Cronjobs für Backup und Snapshot
+    cronjobs = [
+        '0 2 * * * /usr/local/bin/ionos_wp_manager backup --auto',
+        '0 3 * * 0 /usr/local/bin/ionos_wp_manager snapshot'
+    ]
     cmds = [
         'sudo apt update && sudo apt upgrade -y',
         # Systempakete und Tools

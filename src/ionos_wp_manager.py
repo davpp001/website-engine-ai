@@ -15,14 +15,15 @@ from utils.security import ensure_permissions, encrypt_secrets
 app = typer.Typer()
 
 @app.command()
-def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config')):
+def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config'), show_credentials: bool = typer.Option(False, '--show-credentials', help='Credentials sichtbar eingeben')):
     """Interaktive Ersteinrichtung der Config/Credentials (Multi-Cloud-ready)"""
     setup_logging()
     typer.echo("Willkommen zum IONOS WP Manager Init-Wizard!")
-    cf_token = typer.prompt("Cloudflare API Token", hide_input=True)
-    ionos_token = typer.prompt("IONOS API Token", hide_input=True)
-    aws_key = typer.prompt("S3 Access Key ID (AWS/IONOS/MinIO)", hide_input=True)
-    aws_secret = typer.prompt("S3 Secret Access Key (AWS/IONOS/MinIO)", hide_input=True)
+    prompt_kwargs = {'hide_input': not show_credentials}
+    cf_token = typer.prompt("Cloudflare API Token", **prompt_kwargs)
+    ionos_token = typer.prompt("IONOS API Token", **prompt_kwargs)
+    aws_key = typer.prompt("S3 Access Key ID (AWS/IONOS/MinIO)", **prompt_kwargs)
+    aws_secret = typer.prompt("S3 Secret Access Key (AWS/IONOS/MinIO)", **prompt_kwargs)
     s3_endpoint = typer.prompt("S3 Endpoint (z.B. https://s3.eu-central-1.ionoscloud.com)", default="https://s3.amazonaws.com")
     s3_bucket = typer.prompt("S3 Bucket Name")
     ionos_server_id = typer.prompt("IONOS Server ID (für Snapshots)")
@@ -402,6 +403,10 @@ def backup(auto: bool = typer.Option(False, '--auto'), manual: bool = typer.Opti
     now = datetime.datetime.now().strftime('%Y-%m-%d')
     creds = load_credentials()
     cfg = load_config(config)
+    # Debug-Ausgabe der geladenen Credentials (ohne Secrets)
+    debug_creds = {k: (v if 'SECRET' not in k else '***') for k, v in creds.items()}
+    typer.echo(f"[DEBUG] Geladene Credentials: {debug_creds}")
+    typer.echo(f"[DEBUG] Geladene Config: {cfg}")
     s3_bucket = cfg.get('s3_bucket', os.getenv('S3_BUCKET'))
     s3_endpoint = cfg.get('s3_endpoint', creds.get('S3_ENDPOINT'))
     lockfile = f"/tmp/ionos_wp_manager_backup.lock"

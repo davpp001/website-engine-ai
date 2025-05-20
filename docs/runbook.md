@@ -2,6 +2,7 @@
 
 ## Initial Setup
 1. `python3 src/ionos_wp_manager.py init`
+   - Ab sofort werden auch S3 Endpoint, S3 Bucket, IONOS Server ID und Volume ID abgefragt und in die Config geschrieben.
 2. `python3 src/ionos_wp_manager.py server-setup`
 
 ## Site Management
@@ -10,11 +11,13 @@
 
 ## Backup & Snapshot
 - Backup: `python3 src/ionos_wp_manager.py backup --manual`
+  - Nutzt jetzt beliebigen S3-kompatiblen Endpoint (AWS, IONOS S3, MinIO, ...)
 - Snapshot: `python3 src/ionos_wp_manager.py snapshot`
+  - Nutzt die IONOS Server/Volume IDs aus der Config
 
 ## Fehlerbehebung
 - Logs: `/var/log/ionos_wp_manager/`
-- Config: `~/.config/ionos_wp_manager/credentials`
+- Config: `~/.config/ionos_wp_manager/credentials` und `~/.config/ionos_wp_manager/config.yml`
 
 ## Recovery
 - Rollback: Siehe Logs und Backup-Archive

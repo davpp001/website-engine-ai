@@ -23,10 +23,14 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
     ionos_token = typer.prompt("IONOS API Token", hide_input=True)
     aws_key = typer.prompt("AWS Access Key ID", hide_input=True)
     aws_secret = typer.prompt("AWS Secret Access Key", hide_input=True)
+    s3_endpoint = typer.prompt("S3 Endpoint (z.B. https://s3.eu-central-1.ionoscloud.com)", default="https://s3.amazonaws.com")
+    s3_bucket = typer.prompt("S3 Bucket Name")
+    ionos_server_id = typer.prompt("IONOS Server ID (für Snapshots)")
+    ionos_volume_id = typer.prompt("IONOS Volume ID (optional, für Volumen-Snapshots)", default="")
     ssh_key_path = typer.prompt("Pfad zum SSH Private Key", default=os.path.expanduser("~/.ssh/id_rsa"))
     # Validierung
-    if not cf_token or not ionos_token or not aws_key or not aws_secret:
-        typer.echo("API-Tokens und AWS-Credentials dürfen nicht leer sein.")
+    if not cf_token or not ionos_token or not aws_key or not aws_secret or not s3_bucket or not s3_endpoint or not ionos_server_id:
+        typer.echo("API-Tokens, S3- und IONOS-Parameter dürfen nicht leer sein.")
         raise typer.Exit(code=2)
     if not os.path.exists(ssh_key_path):
         typer.echo(f"SSH-Key nicht gefunden: {ssh_key_path}")
@@ -36,15 +40,32 @@ def init(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.O
         'IONOS_API_TOKEN': ionos_token,
         'AWS_ACCESS_KEY_ID': aws_key,
         'AWS_SECRET_ACCESS_KEY': aws_secret,
+        'S3_ENDPOINT': s3_endpoint,
         'SSH_KEY_PATH': ssh_key_path
     }
+    config_data = {
+        's3_bucket': s3_bucket,
+        's3_endpoint': s3_endpoint,
+        'ionos_server_id': ionos_server_id,
+        'ionos_volume_id': ionos_volume_id,
+    }
+    # base_domain ggf. abfragen, falls nicht vorhanden
+    config_file = config or os.path.expanduser('~/.config/ionos_wp_manager/config.yml')
+    if not os.path.exists(config_file):
+        base_domain = typer.prompt("Base Domain (z.B. example.com)")
+        config_data['base_domain'] = base_domain
+    # Save config
+    import yaml
+    os.makedirs(os.path.dirname(config_file), exist_ok=True)
+    with open(config_file, 'w') as f:
+        yaml.dump(config_data, f)
     if dry_run:
-        log_json({"dry-run": True, "creds": list(creds.keys())}, level='INFO')
-        typer.echo("[DRY-RUN] Credentials würden gespeichert.")
+        log_json({"dry-run": True, "creds": list(creds.keys()), "config": config_data}, level='INFO')
+        typer.echo("[DRY-RUN] Credentials und Config würden gespeichert.")
         raise typer.Exit(code=0)
     save_credentials(creds, encrypt=True)
-    typer.echo("Credentials wurden sicher gespeichert.")
-    log_json({"status": "ok", "stored": list(creds.keys())}, level='INFO')
+    typer.echo("Credentials und Config wurden sicher gespeichert.")
+    log_json({"status": "ok", "stored": list(creds.keys()), "config": config_data}, level='INFO')
 
 @app.command()
 def server_setup(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config')):
@@ -335,6 +356,7 @@ def backup(auto: bool = typer.Option(False, '--auto'), manual: bool = typer.Opti
     creds = load_credentials()
     cfg = load_config(config)
     s3_bucket = cfg.get('s3_bucket', os.getenv('S3_BUCKET'))
+    s3_endpoint = cfg.get('s3_endpoint', creds.get('S3_ENDPOINT'))
     lockfile = f"/tmp/ionos_wp_manager_backup.lock"
     @with_lock(lockfile)
     def do_backup():
@@ -342,7 +364,7 @@ def backup(auto: bool = typer.Option(False, '--auto'), manual: bool = typer.Opti
         wp_tar = f"/tmp/wp-content-{now}.tar.gz"
         log_path = f"/var/log/ionos_wp_manager/backup-{now}.log"
         if dry_run:
-            log_json({"dry-run": True, "db_file": db_file, "wp_tar": wp_tar, "s3_bucket": s3_bucket}, level='INFO')
+            log_json({"dry-run": True, "db_file": db_file, "wp_tar": wp_tar, "s3_bucket": s3_bucket, "s3_endpoint": s3_endpoint}, level='INFO')
             typer.echo("[DRY-RUN] Backup würde durchgeführt.")
             return
         # DB-Backup
@@ -361,7 +383,7 @@ def backup(auto: bool = typer.Option(False, '--auto'), manual: bool = typer.Opti
             return
         # S3-Upload DB
         try:
-            s3_upload_backup(db_file, s3_bucket, creds.get('AWS_ACCESS_KEY_ID'), creds.get('AWS_SECRET_ACCESS_KEY'))
+            s3_upload_backup(db_file, s3_bucket, creds.get('AWS_ACCESS_KEY_ID'), creds.get('AWS_SECRET_ACCESS_KEY'), s3_endpoint=s3_endpoint)
         except Exception as e:
             log_json({"status": "error", "step": "s3_upload_db", "error": str(e)}, level='ERROR')
             typer.echo(f"[ERROR] S3-Upload DB fehlgeschlagen: {e}")
@@ -372,7 +394,7 @@ def backup(auto: bool = typer.Option(False, '--auto'), manual: bool = typer.Opti
             return
         # S3-Upload WP-Content
         try:
-            s3_upload_backup(wp_tar, s3_bucket, creds.get('AWS_ACCESS_KEY_ID'), creds.get('AWS_SECRET_ACCESS_KEY'))
+            s3_upload_backup(wp_tar, s3_bucket, creds.get('AWS_ACCESS_KEY_ID'), creds.get('AWS_SECRET_ACCESS_KEY'), s3_endpoint=s3_endpoint)
         except Exception as e:
             log_json({"status": "error", "step": "s3_upload_wp", "error": str(e)}, level='ERROR')
             typer.echo(f"[ERROR] S3-Upload WP-Content fehlgeschlagen: {e}")
@@ -397,14 +419,15 @@ def backup(auto: bool = typer.Option(False, '--auto'), manual: bool = typer.Opti
 def snapshot(dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config')):
     """Server-Snapshot erstellen und rotieren"""
     setup_logging()
-    creds = load_config(os.path.expanduser('~/.config/ionos_wp_manager/credentials'))
+    creds = load_credentials()
     cfg = load_config(config)
-    server_id = cfg.get('server_id', os.getenv('IONOS_SERVER_ID'))
+    server_id = cfg.get('ionos_server_id', os.getenv('IONOS_SERVER_ID'))
+    volume_id = cfg.get('ionos_volume_id', os.getenv('IONOS_VOLUME_ID'))
     lockfile = f"/tmp/ionos_wp_manager_snapshot.lock"
     @with_lock(lockfile)
     def do_snapshot():
         if dry_run:
-            log_json({"dry-run": True, "action": "snapshot", "server_id": server_id}, level='INFO')
+            log_json({"dry-run": True, "action": "snapshot", "server_id": server_id, "volume_id": volume_id}, level='INFO')
             typer.echo("[DRY-RUN] Snapshot würde erstellt und rotiert.")
             return
         snap_id = ionos_create_snapshot(server_id, creds['IONOS_API_TOKEN'])

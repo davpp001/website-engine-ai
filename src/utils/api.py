@@ -92,8 +92,11 @@ def certbot_issue_ssl(domain, cf_token):
         raise Exception(f'Certbot-Fehler: {result.stderr}')
     return result.stdout
 
-def s3_upload_backup(file_path, bucket, aws_key, aws_secret):
-    s3 = boto3.client('s3', aws_access_key_id=aws_key, aws_secret_access_key=aws_secret)
+def s3_upload_backup(file_path, bucket, aws_key, aws_secret, s3_endpoint=None):
+    if s3_endpoint:
+        s3 = boto3.client('s3', aws_access_key_id=aws_key, aws_secret_access_key=aws_secret, endpoint_url=s3_endpoint)
+    else:
+        s3 = boto3.client('s3', aws_access_key_id=aws_key, aws_secret_access_key=aws_secret)
     s3.upload_file(file_path, bucket, os.path.basename(file_path))
 
 def ionos_create_snapshot(server_id, token):

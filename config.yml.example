@@ -1,4 +1,7 @@
 # Beispiel-Konfiguration für ionos_wp_manager
 base_domain: example.com
 s3_bucket: ionos-wp-backups
+s3_endpoint: https://s3.eu-central-1.ionoscloud.com
+ionos_server_id: <deine-server-id>
+ionos_volume_id: <deine-volume-id>
 log_level: INFO

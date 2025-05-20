@@ -298,8 +298,8 @@ FLUSH PRIVILEGES;
         raise typer.Exit(code=2)
 
 @app.command()
-def delete_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config')):
-    """Site und Ressourcen löschen"""
+def delete_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), config: str = typer.Option(None, '--config'), force: bool = typer.Option(False, '--force')):
+    """Site und Ressourcen löschen (löscht auch SSL-Zertifikate und prüft alle Reste)"""
     setup_logging()
     try:
         validate_prefix(prefix)
@@ -313,38 +313,85 @@ def delete_site(prefix: str, dry_run: bool = typer.Option(False, '--dry-run'), c
     lockfile = f"/tmp/ionos_wp_manager_delete_{prefix}.lock"
     @with_lock(lockfile)
     def do_delete():
+        status = {}
         if dry_run:
             log_json({"dry-run": True, "action": "delete-site", "domain": full_domain}, level='INFO')
             typer.echo(f"[DRY-RUN] Site {full_domain} würde gelöscht.")
             return
         db_name = f"wp_{prefix}"
         db_user = f"wp_{prefix}_user"
-        sql = f'''
+        # 1. DB & User löschen
+        try:
+            sql = f'''
 DROP DATABASE IF EXISTS `{db_name}`;
 DROP USER IF EXISTS '{db_user}'@'localhost';
 FLUSH PRIVILEGES;
 '''
-        with open('/tmp/wp_delete.sql', 'w') as f:
-            f.write(sql)
-        os.system("sudo mysql < /tmp/wp_delete.sql")
-        # Webroot löschen und prüfen
+            with open('/tmp/wp_delete.sql', 'w') as f:
+                f.write(sql)
+            ret = os.system("sudo mysql < /tmp/wp_delete.sql")
+            status['db'] = 'ok' if ret == 0 else 'error'
+        except Exception as e:
+            status['db'] = f'error: {e}'
+            if not force:
+                log_json({"step": "delete-db", "status": "error", "error": str(e)}, level='ERROR')
+                typer.echo(f"[ERROR] DB/User-Löschung fehlgeschlagen: {e}")
+                return
+        # 2. Webroot löschen
         webroot = f"/var/www/{prefix}"
-        if os.path.exists(webroot):
-            os.system(f"rm -rf {webroot}")
+        try:
             if os.path.exists(webroot):
-                typer.echo(f"[WARN] Webroot {webroot} konnte nicht gelöscht werden!")
+                os.system(f"rm -rf {webroot}")
+                if os.path.exists(webroot):
+                    typer.echo(f"[WARN] Webroot {webroot} konnte nicht gelöscht werden!")
+                    status['webroot'] = 'error'
+                else:
+                    typer.echo(f"[OK] Webroot {webroot} gelöscht.")
+                    status['webroot'] = 'ok'
             else:
-                typer.echo(f"[OK] Webroot {webroot} gelöscht.")
-        else:
-            typer.echo(f"[INFO] Webroot {webroot} war nicht vorhanden.")
-        # Nginx-Konfig löschen
-        os.system(f"rm -f /etc/nginx/sites-available/{full_domain} /etc/nginx/sites-enabled/{full_domain}")
-        os.system(f"rm -f /etc/nginx/sites-available/{full_domain}_ssl /etc/nginx/sites-enabled/{full_domain}_ssl")
-        os.system("nginx -t && systemctl reload nginx")
-        # DNS löschen
-        cloudflare_delete_dns(full_domain, creds['CF_API_TOKEN'])
-        log_json({"status": "deleted", "domain": full_domain}, level='INFO')
-        typer.echo(f"Site {full_domain} gelöscht.")
+                typer.echo(f"[INFO] Webroot {webroot} war nicht vorhanden.")
+                status['webroot'] = 'notfound'
+        except Exception as e:
+            status['webroot'] = f'error: {e}'
+            if not force:
+                log_json({"step": "delete-webroot", "status": "error", "error": str(e)}, level='ERROR')
+                return
+        # 3. Nginx-Konfig löschen
+        try:
+            os.system(f"rm -f /etc/nginx/sites-available/{full_domain} /etc/nginx/sites-enabled/{full_domain}")
+            os.system(f"rm -f /etc/nginx/sites-available/{full_domain}_ssl /etc/nginx/sites-enabled/{full_domain}_ssl")
+            os.system("nginx -t && systemctl reload nginx")
+            status['nginx'] = 'ok'
+        except Exception as e:
+            status['nginx'] = f'error: {e}'
+            if not force:
+                log_json({"step": "delete-nginx", "status": "error", "error": str(e)}, level='ERROR')
+                return
+        # 4. SSL-Zertifikate löschen
+        try:
+            ssl_live = f"/etc/letsencrypt/live/{full_domain}"
+            ssl_archive = f"/etc/letsencrypt/archive/{full_domain}"
+            ssl_renew = f"/etc/letsencrypt/renewal/{full_domain}.conf"
+            for path in [ssl_live, ssl_archive, ssl_renew]:
+                if os.path.exists(path):
+                    os.system(f"rm -rf {path}")
+            status['ssl'] = 'ok'
+        except Exception as e:
+            status['ssl'] = f'error: {e}'
+            if not force:
+                log_json({"step": "delete-ssl", "status": "error", "error": str(e)}, level='ERROR')
+                return
+        # 5. DNS löschen
+        try:
+            cloudflare_delete_dns(full_domain, creds['CF_API_TOKEN'])
+            status['dns'] = 'ok'
+        except Exception as e:
+            status['dns'] = f'error: {e}'
+            if not force:
+                log_json({"step": "delete-dns", "status": "error", "error": str(e)}, level='ERROR')
+                return
+        log_json({"status": "deleted", "domain": full_domain, "details": status}, level='INFO')
+        typer.echo(f"Site {full_domain} gelöscht. Details: {status}")
     do_delete()
 
 @app.command()

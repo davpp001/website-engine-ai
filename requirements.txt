@@ -1,0 +1,8 @@
+# requirements.txt
+Typer[all]
+PyYAML
+cryptography
+boto3
+requests
+python-dotenv
+pytest

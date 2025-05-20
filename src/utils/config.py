@@ -1,0 +1,39 @@
+import os
+import yaml
+from cryptography.fernet import Fernet
+from pathlib import Path
+
+def load_config(config_path=None):
+    config_file = config_path or os.getenv('IONOS_WP_MANAGER_CONFIG') or os.path.expanduser('~/.config/ionos_wp_manager/config.yml')
+    if not os.path.exists(config_file):
+        return {}
+    with open(config_file, 'r') as f:
+        return yaml.safe_load(f)
+
+def save_credentials(creds: dict, encrypt=True):
+    cred_dir = os.path.expanduser('~/.config/ionos_wp_manager')
+    os.makedirs(cred_dir, exist_ok=True)
+    cred_file = os.path.join(cred_dir, 'credentials')
+    if encrypt:
+        key_file = os.path.join(cred_dir, 'key')
+        if not os.path.exists(key_file):
+            key = Fernet.generate_key()
+            with open(key_file, 'wb') as kf:
+                kf.write(key)
+        else:
+            with open(key_file, 'rb') as kf:
+                key = kf.read()
+        f = Fernet(key)
+        data = f.encrypt(yaml.dump(creds).encode())
+        with open(cred_file, 'wb') as cf:
+            cf.write(data)
+    else:
+        with open(cred_file, 'w') as cf:
+            yaml.dump(creds, cf)
+    os.chmod(cred_file, 0o600)
+
+def validate_prefix(prefix: str):
+    import re
+    if not re.match(r'^[a-zA-Z0-9]+$', prefix):
+        raise ValueError('Prefix must be alphanumeric')
+    return prefix

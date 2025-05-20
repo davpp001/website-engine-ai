@@ -1,0 +1,4 @@
+# Beispiel-Konfiguration für ionos_wp_manager
+base_domain: example.com
+s3_bucket: ionos-wp-backups
+log_level: INFO

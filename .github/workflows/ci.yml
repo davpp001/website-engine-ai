@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    - name: Lint
+      run: |
+        pip install black flake8
+        black --check src/
+        flake8 src/
+    - name: Unit Tests
+      run: pytest tests/unit/
+    - name: Integration Tests
+      run: pytest tests/integration/
+    - name: ShellCheck (Terraform)
+      run: |
+        sudo apt-get install -y shellcheck
+        shellcheck terraform/*.sh || true
+    - name: Release
+      if: github.ref == 'refs/heads/main'
+      run: echo "Release step (SemVer tagging, PyPI, etc.)"
